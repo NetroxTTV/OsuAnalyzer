@@ -1,0 +1,53 @@
+# Push a tag like v1.0.0 -> builds the exe on Windows and attaches it to a draft release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Check tag matches __version__
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $v = python -c "import osu_hit_analyzer as m; print(m.__version__)"
+          if ("v$v" -ne "${{ github.ref_name }}") {
+            Write-Error "Tag ${{ github.ref_name }} does not match __version__ $v in osu_hit_analyzer.py"
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        shell: pwsh
+        run: |
+          ./build.ps1
+          Copy-Item "dist/osu Hit Analyzer.exe" "osu-Hit-Analyzer.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osu-Hit-Analyzer
+          path: osu-Hit-Analyzer.exe
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: osu-Hit-Analyzer.exe
