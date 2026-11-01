@@ -89,3 +89,5 @@ The app keeps a beatmap index (so lookups are instant after the first scan) and 
 ## License
 
 [MIT](LICENSE)
+
+osu! Hit Analyzer is a fan-made tool and is not affiliated with or endorsed by ppy Pty Ltd. "osu!" is a trademark of ppy Pty Ltd.
