@@ -20,13 +20,36 @@ class Driver:
     mm = None            # millimetres per unit, None when unknown
     decimals = 0
     defaults = {}        # area fields + tablet_w / tablet_h
-    hint = tablet_hint = stretch_note = invalid = ""
+    hint = tablet_hint = stretch_note = ""
+    axes = ()            # per axis: (position field, size field, tablet size field)
 
     def edges(self, v):
         raise NotImplementedError
 
     def values(self, edges):
         raise NotImplementedError
+
+    def check(self, v):
+        """{field: what is wrong} for values that can't be an area on this tablet."""
+        errors = {k: "must be > 0" for k in ("tablet_w", "tablet_h") if v[k] <= 0}
+        if not errors:
+            for axis in self.axes:
+                self._check_axis(v, *axis, errors)
+        return errors
+
+    def _check_axis(self, v, pos, size, tablet, errors):
+        s, t = v[size], v[tablet]
+        if s <= 0:
+            errors[size] = "must be > 0"
+        elif s > t + 1e-9:
+            errors[size] = f"max {fmt(t)}"
+        else:
+            lo, hi = self._pos_range(s, t)
+            if not lo - 1e-9 <= v[pos] <= hi + 1e-9:
+                errors[pos] = f"{fmt(lo)} to {fmt(hi)}" if lo else f"max {fmt(hi)}"
+
+    def _pos_range(self, size, tablet):
+        return 0, tablet - size
 
     def length(self, x):
         return f"{fmt(x)} {self.unit}".rstrip()
@@ -56,13 +79,23 @@ class Wacom(Driver):
     hint = "As in Wacom Center, in tablet points (100 points = 1 mm)."
     tablet_hint = "Intuos S = 15200 × 9500"
     stretch_note = "\"Force proportions\" off"
-    invalid = "Bottom must be greater than Top, and Right greater than Left."
 
     def edges(self, v):
         return tuple(v[k] for k in AREA_KEYS)
 
     def values(self, edges):
         return dict(zip(AREA_KEYS, edges))
+
+    def check(self, v):
+        errors = {k: "must be > 0" for k in ("tablet_w", "tablet_h") if v[k] <= 0}
+        if errors:
+            return errors
+        for lo, hi, name, tablet in (("top", "bottom", "Top", "tablet_h"), ("left", "right", "Left", "tablet_w")):
+            if v[hi] <= v[lo]:
+                errors[hi] = f"must be > {name}"
+            elif v[hi] > v[tablet]:
+                errors[hi] = f"max {fmt(v[tablet])}"
+        return errors
 
 
 class OpenTabletDriver(Driver):
@@ -74,7 +107,7 @@ class OpenTabletDriver(Driver):
             "Rotation 0, display area = the whole screen.")
     tablet_hint = "Full tablet area in mm  ·  CTL-472 / CTL-4100 = 152 × 95"
     stretch_note = "\"Lock aspect ratio\" off"
-    invalid = "Width, Height and the tablet size must be greater than 0."
+    axes = (("x", "width", "tablet_w"), ("y", "height", "tablet_h"))
 
     def edges(self, v):
         w, h = v["width"], v["height"]
@@ -83,6 +116,9 @@ class OpenTabletDriver(Driver):
     def values(self, edges):
         t, b, l, r = edges
         return {"width": r - l, "height": b - t, "x": (l + r) / 2, "y": (t + b) / 2}
+
+    def _pos_range(self, size, tablet):
+        return size / 2, tablet - size / 2
 
 
 class XPPen(Driver):
@@ -94,7 +130,7 @@ class XPPen(Driver):
             "Enter the tablet size in the same unit (the values shown with Full Area).")
     tablet_hint = "Full Area of your tablet  ·  Star G640 = 152.4 × 101.6 mm"
     stretch_note = "work area not set to \"Screen Ratio\""
-    invalid = "W, H and the tablet size must be greater than 0."
+    axes = (("x", "w", "tablet_w"), ("y", "h", "tablet_h"))
 
     def edges(self, v):
         return v["y"], v["y"] + v["h"], v["x"], v["x"] + v["w"]

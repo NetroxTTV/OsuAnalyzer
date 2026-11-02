@@ -33,6 +33,10 @@ Grab **`osu-Hit-Analyzer.exe`** from the [latest release](https://github.com/Net
 - Shows where on the playfield you overaim or underaim
 - Suggests a corrected tablet area from your systematic aim errors, in the format of your driver: Wacom (top / bottom / left / right in tablet points, as in Wacom Center), OpenTabletDriver (width / height / X / Y centre, in mm) or XP-Pen (X / Y / W / H, as in the driver's Work Area)
 
+### Rapid Trigger
+- For analog (Hall effect) keyboards: suggests an actuation point and rapid trigger press / release distances from how you tap
+- Measures how fast you press the same key again, double presses, broken slider holds, keys still held on a note, and whether quick re-presses land late
+
 ### History
 - Every analysed replay is saved: follow your unstable rate, accuracy, aim offset, timing and misses over time
 - Rolling average, comparison of your last 10 replays with the 10 before, and markers where your tablet area changed
@@ -49,7 +53,7 @@ Grab **`osu-Hit-Analyzer.exe`** from the [latest release](https://github.com/Net
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+1` … `Ctrl+4` | Replay Viewer / Hit Analyzer / Tablet Zone / History |
+| `Ctrl+1` … `Ctrl+5` | Replay Viewer / Hit Analyzer / Tablet Zone / Rapid Trigger / History |
 | `Ctrl+,` | Settings |
 | `Ctrl+O` | Open replay files |
 | `Ctrl+F` | Filter the replay list |
@@ -99,13 +103,14 @@ Pushing a tag like `v1.0.0` builds the exe on GitHub Actions and attaches it to 
 gui.py                  desktop app entry point
 osu_hit_analyzer.py     command-line entry point
 osu_analyzer/
-  core/                 no UI: replay / beatmap parsing, hit detection, statistics, tablet calibration
+  core/                 no UI: replay / beatmap parsing, hit detection, statistics, tablet calibration, rapid trigger
   ui/                   PySide6 app
     theme.py, icons.py  colours, fonts, stylesheet, icon glyphs
     widgets/            custom painted widgets (buttons, segmented control, cards, inputs...)
     viewer/             Replay Viewer: scene, playback clock, renderers, seek bar, page
     analyzer/           Hit Analyzer: hit scatter, charts, page
     tablet/             Tablet Zone
+    rapid_trigger/      Rapid Trigger
     history/            History: progress chart, table, import of recent replays
     main_window.py      wires the sidebar, the analysis controller and the pages together
   audio.py              music playback for the viewer

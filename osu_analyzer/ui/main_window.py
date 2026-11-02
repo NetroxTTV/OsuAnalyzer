@@ -15,6 +15,7 @@ from .analyzer import AnalyzerPage
 from .controller import AnalysisController
 from .history import HistoryPage
 from .library import ReplayLibrary
+from .rapid_trigger import RapidTriggerPage
 from .settings_page import SettingsPage
 from .sidebar import Sidebar
 from .tablet import TabletPage
@@ -23,7 +24,8 @@ from .viewer import ViewerPage
 from .widgets import IconButton, LoadingOverlay, SegmentedControl, Surface, hbox, label, set_role
 
 PAGES = [("viewer", "Replay Viewer", icons.VIDEO), ("analyzer", "Hit Analyzer", icons.TARGET),
-         ("tablet", "Tablet Zone", icons.PEN), ("history", "History", icons.HISTORY)]
+         ("tablet", "Tablet Zone", icons.PEN), ("rapid", "Rapid Trigger", icons.KEYBOARD),
+         ("history", "History", icons.HISTORY)]
 
 
 class MainWindow(QMainWindow):
@@ -83,10 +85,11 @@ class MainWindow(QMainWindow):
         self.viewer = ViewerPage()
         self.analyzer = AnalyzerPage()
         self.tablet = TabletPage(self._screen_size)
+        self.rapid = RapidTriggerPage()
         self.history_page = HistoryPage(self.history, self.library)
         self.settings = SettingsPage(self.library.auto_load, self.viewer.bg_dim, self.updater)
         self.pages = {"viewer": self.viewer, "analyzer": self.analyzer, "tablet": self.tablet,
-                      "history": self.history_page, "settings": self.settings}
+                      "rapid": self.rapid, "history": self.history_page, "settings": self.settings}
         for w in self.pages.values():
             self.stack.addWidget(w)
         self.overlay = LoadingOverlay(self.pages_box)
@@ -128,6 +131,7 @@ class MainWindow(QMainWindow):
         self.analyzer.sliderHeadsChanged.connect(lambda on: setattr(self.history_page, "slider_heads", on))
         self.analyzer.saveRequested.connect(self.save_image)
         self.tablet.message.connect(self.set_status)
+        self.rapid.message.connect(self.set_status)
         self.history_page.message.connect(self.set_status)
         self.history_page.openRequested.connect(self._open_from_history)
         self.updater.finished.connect(self._update_checked)
@@ -164,9 +168,9 @@ class MainWindow(QMainWindow):
         if key == "viewer":
             self.viewer.setFocus()
 
-    def set_status(self, text, warning=False):
+    def set_status(self, text, warning=False, error=False):
         self.status.setText(text)
-        set_role(self.status, "warning" if warning else "caption")
+        set_role(self.status, "status-error" if error else "warning" if warning else "caption")
 
     # ---------------------------------------------------------- analysis --
 
@@ -179,7 +183,7 @@ class MainWindow(QMainWindow):
         self.overlay.set_status("Drawing...")
         self.viewer.set_analyses(analyses)
         self._record_history(analyses)
-        self._dirty = {"analyzer", "tablet", "history"}
+        self._dirty = {"analyzer", "tablet", "rapid", "history"}
         if self.page in self._dirty:
             self._dirty.discard(self.page)
             self.pages[self.page].set_analyses(analyses)

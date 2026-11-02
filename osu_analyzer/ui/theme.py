@@ -127,11 +127,14 @@ class Theme(QObject):
         QLabel[role="metric"] {{ font-size: 22pt; font-weight: 600; }}
         QLabel[role="metric-sm"] {{ font-size: 15pt; font-weight: 600; }}
         QLabel[role="warning"] {{ color: {warning}; }}
+        QLabel[role="error"] {{ color: {miss}; font-size: 8.5pt; }}
+        QLabel[role="status-error"] {{ color: {miss}; }}
 
         QLineEdit {{ background: {elevated}; border: 1px solid {border}; border-radius: 8px;
                      padding: 6px 10px; selection-background-color: {accent_soft}; }}
         QLineEdit:hover {{ border-color: #3a3a4a; }}
         QLineEdit:focus {{ border-color: {accent}; }}
+        QLineEdit[invalid="true"] {{ border-color: {miss}; }}
         QLineEdit#Bare {{ background: transparent; border: none; padding: 0; }}
 
         QComboBox {{ background: {elevated}; border: 1px solid {border}; border-radius: 8px;

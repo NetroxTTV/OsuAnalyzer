@@ -201,6 +201,9 @@ def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080
             d = math.copysign(max_change * size, d)
         v = min(limit, max(0, round((f.current + d) / step) * step))
         f.suggested = int(v) if step >= 1 else round(v, 4)
+    for lo, hi in ((fl, fr), (ft, fb)):
+        if hi.suggested <= lo.suggested:    # area outside the tablet: nothing sensible to suggest
+            lo.suggested, hi.suggested = lo.current, hi.current
     edges = dict(zip(EDGE_NAMES, (ft, fb, fl, fr)))
     suggested = (ft.suggested, fb.suggested, fl.suggested, fr.suggested)
 

@@ -2,13 +2,17 @@
 
 import sys
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ..settings import DATA_DIR
 from .theme import theme
+
+ERROR_LOG = DATA_DIR / "errors.log"
 
 
 def resource(name):
@@ -77,10 +81,24 @@ def main():
         selftest(sys.argv[2], sys.argv[3])
         return 0
     app = create_app()
+    window = None
 
     def report(exc, val, tb):
+        """Unexpected errors go to errors.log and, once the window is up, to its status bar in red
+        (a dialog only while starting, when nothing else can show them)."""
+        text = "".join(traceback.format_exception(exc, val, tb))
         traceback.print_exception(exc, val, tb)
-        QMessageBox.critical(None, "Error", "".join(traceback.format_exception(exc, val, tb))[-2000:])
+        try:
+            ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(ERROR_LOG, "a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S}\n{text}\n")
+        except OSError:
+            pass
+        if window is None:
+            QMessageBox.critical(None, "Error", text[-2000:])
+        else:
+            window.set_status(f"Something went wrong ({exc.__name__}: {val})  ·  details in {ERROR_LOG}",
+                              error=True)
     sys.excepthook = report
 
     from .loading import LoadingScreen
