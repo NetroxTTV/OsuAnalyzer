@@ -29,7 +29,7 @@ Grab **`osu-Hit-Analyzer.exe`** from the [latest release](https://github.com/Net
 
 ### Tablet Zone
 - Shows where on the playfield you overaim or underaim
-- Suggests a corrected tablet area (top / bottom / left / right, in tablet points as in Wacom Center) from your systematic aim errors
+- Suggests a corrected tablet area from your systematic aim errors, in the format of your driver: Wacom (top / bottom / left / right in tablet points, as in Wacom Center), OpenTabletDriver (width / height / X / Y centre, in mm) or XP-Pen (X / Y / W / H, as in the driver's Work Area)
 
 ### History
 - Every analysed replay is saved: follow your unstable rate, accuracy, aim offset, timing and misses over time

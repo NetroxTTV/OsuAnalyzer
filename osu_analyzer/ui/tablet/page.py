@@ -1,23 +1,21 @@
 """Tablet Zone page: suggests a tablet area from where you over / underaim on the playfield."""
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QIntValidator
+from PySide6.QtCore import QLocale, Qt, QTimer, Signal
+from PySide6.QtGui import QDoubleValidator, QGuiApplication, QIntValidator
 from PySide6.QtWidgets import QGridLayout, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
-from ...core import settings, suggest_tablet_area
+from ...core import DRIVERS, current_driver, settings, suggest_tablet_area
+from ...core.drivers import fmt
 from .. import icons
 from ..theme import theme
-from ..widgets import Button, Card, clear_layout, hbox, label
+from ..widgets import Button, Card, SegmentedControl, clear_layout, hbox, label
 from .views import FieldHeatmap, TabletAreaView
 
-AREA_DEFAULTS = {"top": 2000, "bottom": 5000, "left": 1600, "right": 5000,
-                 "tablet_w": 15200, "tablet_h": 9500}
-DEFAULT_TABLET = (AREA_DEFAULTS["tablet_w"], AREA_DEFAULTS["tablet_h"])
-FIELDS = (("top", "Top"), ("bottom", "Bottom"), ("left", "Left"), ("right", "Right"))
+EDGES = (("top", "Top"), ("bottom", "Bottom"), ("left", "Left"), ("right", "Right"))
 SIDES = {"top": "top notes", "bottom": "bottom notes", "left": "left notes", "right": "right notes"}
 
 
-def describe_edge(key, e):
+def describe_edge(key, e, driver):
     side = SIDES[key]
     if e.stderr is None:
         return "not enough notes to measure"
@@ -26,8 +24,12 @@ def describe_edge(key, e):
         return f"no clear bias on {side}, unchanged"
     outward = d > 0 if key in ("bottom", "right") else d < 0
     if outward:
-        return f"you overaim {side}  →  edge moved out by {abs(d)}"
-    return f"you underaim {side}  →  edge moved in by {abs(d)}"
+        return f"you overaim {side}  →  edge moved out by {driver.length(abs(d))}"
+    return f"you underaim {side}  →  edge moved in by {driver.length(abs(d))}"
+
+
+def signed(x):
+    return ("+" if x > 0 else "-") + fmt(abs(x))
 
 
 class TabletPage(QWidget):
@@ -39,6 +41,7 @@ class TabletPage(QWidget):
         super().__init__(parent)
         self.screen_size = screen_size
         self.analyses = []
+        self.driver = current_driver()
         self._timer = QTimer(self, singleShot=True, interval=250)
         self._timer.timeout.connect(self.refresh)
 
@@ -57,23 +60,14 @@ class TabletPage(QWidget):
         outer.addWidget(scroll, 5)
 
         area = Card(title="Your tablet area")
-        area.body.addWidget(label("As in Wacom Center, in tablet points (100 points = 1 mm).", "caption"))
-        stored = {**AREA_DEFAULTS, **{k: settings[k] for k in AREA_DEFAULTS if k in settings}}
-        self.inputs = {}
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(8)
-        for i, (key, name) in enumerate(FIELDS):
-            r, c = divmod(i, 2)
-            grid.addWidget(label(name, "muted"), r, c * 2)
-            grid.addWidget(self._input(key, stored[key]), r, c * 2 + 1)
-        grid.addWidget(label("Tablet", "muted"), 2, 0)
-        size = hbox(self._input("tablet_w", stored["tablet_w"]), label("×", "muted"),
-                    self._input("tablet_h", stored["tablet_h"]), spacing=8)
-        grid.addLayout(size, 2, 1, 1, 3)
-        grid.setColumnStretch(4, 1)
-        area.body.addLayout(grid)
-        area.body.addWidget(label("Intuos S = 15200 × 9500", "caption"))
+        self.driver_opt = SegmentedControl([(d.key, d.name) for d in DRIVERS.values()], self.driver.key)
+        self.driver_opt.changed.connect(self._set_driver)
+        area.body.addLayout(hbox(label("Driver", "muted"), self.driver_opt, None, spacing=10))
+        area.body.addSpacing(4)
+        self.form = QVBoxLayout()
+        self.form.setSpacing(8)
+        area.body.addLayout(self.form)
+        self._build_form()
         area.body.addSpacing(6)
         self.tablet_view = TabletAreaView()
         area.body.addWidget(self.tablet_view)
@@ -98,13 +92,48 @@ class TabletPage(QWidget):
         theme.changed.connect(self.refresh)
         self.refresh()
 
+    def _build_form(self):
+        """The driver's own fields, filled with what was last entered for it."""
+        clear_layout(self.form)
+        d = self.driver
+        stored = d.stored()
+        self.inputs = {}
+        self.form.addWidget(label(d.hint, "caption", wrap=True))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        for i, (key, name) in enumerate(d.fields):
+            r, c = divmod(i, 2)
+            grid.addWidget(label(name, "muted"), r, c * 2)
+            grid.addWidget(self._input(key, stored[key]), r, c * 2 + 1)
+        grid.addWidget(label("Tablet", "muted"), 2, 0)
+        size = hbox(self._input("tablet_w", stored["tablet_w"]), label("×", "muted"),
+                    self._input("tablet_h", stored["tablet_h"]), spacing=8)
+        grid.addLayout(size, 2, 1, 1, 3)
+        grid.setColumnStretch(4, 1)
+        self.form.addLayout(grid)
+        self.form.addWidget(label(d.tablet_hint, "caption", wrap=True))
+
     def _input(self, key, value):
-        e = QLineEdit(str(value))
-        e.setValidator(QIntValidator(0, 100000, e))
+        e = QLineEdit(fmt(value))
+        if self.driver.decimals:
+            v = QDoubleValidator(0, 100000, self.driver.decimals, e)
+            v.setNotation(QDoubleValidator.Notation.StandardNotation)
+            v.setLocale(QLocale.c())
+        else:
+            v = QIntValidator(0, 100000, e)
+        e.setValidator(v)
         e.setFixedWidth(96)
         e.textChanged.connect(lambda _t: self._timer.start())
         self.inputs[key] = e
         return e
+
+    def _set_driver(self, key):
+        self.driver = DRIVERS[key]
+        settings.update(tablet_driver=key)
+        self._timer.stop()
+        self._build_form()
+        self.refresh()
 
     # ---------------------------------------------------------- page API --
 
@@ -114,18 +143,20 @@ class TabletPage(QWidget):
 
     def refresh(self):
         clear_layout(self.result)
+        d = self.driver
         try:
-            vals = {k: int(e.text()) for k, e in self.inputs.items()}
+            vals = {k: float(e.text()) if d.decimals else int(e.text()) for k, e in self.inputs.items()}
         except ValueError:
-            self._note("Enter whole numbers in every field.")
+            self._note("Enter a number in every field." if d.decimals else "Enter whole numbers in every field.")
             return
-        area = (vals["top"], vals["bottom"], vals["left"], vals["right"])
+        area = d.edges(vals)
         tablet = (vals["tablet_w"], vals["tablet_h"])
         if area[1] <= area[0] or area[3] <= area[2] or min(tablet) <= 0:
-            self._note("Bottom must be greater than Top, and Right greater than Left.")
-            self.tablet_view.set_data(tablet if min(tablet) > 0 else DEFAULT_TABLET, None, None)
+            self._note(d.invalid)
+            default = (d.defaults["tablet_w"], d.defaults["tablet_h"])
+            self.tablet_view.set_data(tablet if min(tablet) > 0 else default, None, None)
             return
-        settings.update(**vals)
+        d.store(vals)
 
         if not self.analyses:
             self.tablet_view.set_data(tablet, area, None)
@@ -164,11 +195,14 @@ class TabletPage(QWidget):
         grid = QGridLayout()
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(6)
-        for i, (key, name) in enumerate(FIELDS):
+        d = self.driver
+        olds, news = d.values(area), d.values(s.suggested)
+        for i, (key, name) in enumerate(d.fields):
             r, c = divmod(i, 2)
-            old, new = area[i], s.suggested[i]
-            value = label(f"{new}" + (f"   {new - old:+d}" if new != old else ""), "metric-sm")
-            if new != old:
+            old, new = olds[key], news[key]
+            changed = abs(new - old) > 1e-6
+            value = label(fmt(new) + (f"   {signed(new - old)}" if changed else ""), "metric-sm")
+            if changed:
                 value.setStyleSheet(f"color: {theme.gold.name()};")
             grid.addWidget(label(name, "muted"), r, c * 2)
             grid.addWidget(value, r, c * 2 + 1)
@@ -179,14 +213,19 @@ class TabletPage(QWidget):
         row.addLayout(grid, 1)
         row.addWidget(copy, 0, Qt.AlignmentFlag.AlignTop)
         card.body.addLayout(row)
-        ow, oh = (area[3] - area[2]) / 100, (area[1] - area[0]) / 100
-        nw, nh = (s.suggested[3] - s.suggested[2]) / 100, (s.suggested[1] - s.suggested[0]) / 100
-        card.body.addWidget(label(f"{nw:.1f} × {nh:.1f} mm   (was {ow:.1f} × {oh:.1f} mm)", "caption"))
+        ow, oh = area[3] - area[2], area[1] - area[0]
+        nw, nh = s.suggested[3] - s.suggested[2], s.suggested[1] - s.suggested[0]
+        if d.mm:
+            size = (f"{nw * d.mm:.1f} × {nh * d.mm:.1f} mm   "
+                    f"(was {ow * d.mm:.1f} × {oh * d.mm:.1f} mm)")
+        else:
+            size = f"{fmt(nw)} × {fmt(nh)}   (was {fmt(ow)} × {fmt(oh)})"
+        card.body.addWidget(label(size, "caption"))
         self.result.addWidget(card)
 
         why = Card(title="Why")
-        for key, name in FIELDS:
-            why.body.addWidget(label(f"{name}:  {describe_edge(key, s.edges[key])}", "body", wrap=True))
+        for key, name in EDGES:
+            why.body.addWidget(label(f"{name}:  {describe_edge(key, s.edges[key], d)}", "body", wrap=True))
         why.body.addWidget(label(f"Estimated misses on {'this replay' if n == 1 else 'these replays'}:  "
                                  f"{s.misses_now}  →  {s.misses_after}", "h3"))
         notes = []
@@ -201,15 +240,14 @@ class TabletPage(QWidget):
         sw, sh = screen
         zr, sr = (area[3] - area[2]) / (area[1] - area[0]), sw / sh
         if abs(zr / sr - 1) > 0.05:
-            notes.append(f"Computed for an area stretched over the whole {sw}×{sh} screen (\"Force "
-                         f"proportions\" off). Your area ratio ({zr:.2f}) differs from the screen's ({sr:.2f}).")
+            notes.append(f"Computed for an area stretched over the whole {sw}×{sh} screen ({d.stretch_note}). "
+                         f"Your area ratio ({zr:.2f}) differs from the screen's ({sr:.2f}).")
         notes.append("Apply it, play a few maps, then analyse again: adjust in small steps.")
         for text in notes:
             why.body.addWidget(label(text, "caption", wrap=True))
         self.result.addWidget(why)
 
     def _copy(self, area):
-        t, b, l, r = area
-        QGuiApplication.clipboard().setText(f"Top {t}  Bottom {b}  Left {l}  Right {r}")
+        QGuiApplication.clipboard().setText(self.driver.copy_text(area))
         self.message.emit("Suggested area copied to the clipboard")
 

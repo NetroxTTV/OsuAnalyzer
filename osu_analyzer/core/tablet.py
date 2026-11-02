@@ -134,7 +134,15 @@ class TabletSuggestion:
     regions: list
 
 
-def _fit_axis(samples, axis, lo, hi, screen):
+def round_step(size):
+    """Step the edges are rounded to: about 1/3000 of the tablet, a 1 / 2 / 5 multiple of a power
+    of ten (5 points on a 15200 point Wacom, 0.05 mm on a 152 mm one)."""
+    raw = size / 3000
+    mag = 10 ** math.floor(math.log10(raw))
+    return max(m * mag for m in (1, 2, 5) if m * mag <= raw * (1 + 1e-9))
+
+
+def _fit_axis(samples, axis, lo, hi, screen, min_change):
     """Least-squares edges (lo', hi') so that the pen positions used land on the notes."""
     us, ps = [], []
     for s in samples:
@@ -158,8 +166,8 @@ def _fit_axis(samples, axis, lo, hi, screen):
     b = (s11 * t2 - s12 * t1) / det
     var = sum((p - a * (1 - u) - b * u) ** 2 for u, p in zip(us, ps)) / (n - 2)
     se_a, se_b = math.sqrt(var * s22 / det), math.sqrt(var * s11 / det)
-    sig_a = abs(a - lo) > 2 * se_a and abs(a - lo) >= 10
-    sig_b = abs(b - hi) > 2 * se_b and abs(b - hi) >= 10
+    sig_a = abs(a - lo) > 2 * se_a and abs(a - lo) >= min_change
+    sig_b = abs(b - hi) > 2 * se_b and abs(b - hi) >= min_change
     # Refit with the edge that shows no clear bias held where it is
     if sig_a and not sig_b:
         b = hi
@@ -173,21 +181,26 @@ def _fit_axis(samples, axis, lo, hi, screen):
 
 
 def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080), max_change=0.15):
-    """area = (top, bottom, left, right) in tablet points, as in Wacom Center.
-    Assumes the area is mapped to the whole screen (Wacom default)."""
+    """area = (top, bottom, left, right) edges from the tablet's top-left corner, in any unit as long
+    as tablet (width, height) uses the same one (see drivers.py).
+    Assumes the area is mapped to the whole screen (the drivers' default)."""
     top, bottom, left, right = area
+    step = round_step(tablet[0])
     samples = aim_samples(analyses)
-    fl, fr = _fit_axis(samples, 0, left, right, screen)
-    ft, fb = _fit_axis(samples, 1, top, bottom, screen)
+    fl, fr = _fit_axis(samples, 0, left, right, screen, 2 * step)
+    ft, fb = _fit_axis(samples, 1, top, bottom, screen, 2 * step)
 
     clamped = False
     for f, size, limit in ((fl, right - left, tablet[0]), (fr, right - left, tablet[0]),
                            (ft, bottom - top, tablet[1]), (fb, bottom - top, tablet[1])):
         d = f.suggested - f.current
+        if not d:
+            continue                    # unchanged edges keep their exact value
         if abs(d) > max_change * size:
             clamped = True
             d = math.copysign(max_change * size, d)
-        f.suggested = int(min(limit, max(0, round((f.current + d) / 5) * 5)))
+        v = min(limit, max(0, round((f.current + d) / step) * step))
+        f.suggested = int(v) if step >= 1 else round(v, 4)
     edges = dict(zip(EDGE_NAMES, (ft, fb, fl, fr)))
     suggested = (ft.suggested, fb.suggested, fl.suggested, fr.suggested)
 

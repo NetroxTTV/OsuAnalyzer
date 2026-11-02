@@ -6,18 +6,10 @@ from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..settings import DATA_DIR, settings
+from ..settings import DATA_DIR
 from .stats import HitStats
 
 HISTORY_PATH = DATA_DIR / "history.json"
-AREA_KEYS = ("top", "bottom", "left", "right")
-
-
-def current_tablet_area():
-    """The tablet area entered on the Tablet Zone page, or None."""
-    if all(k in settings for k in AREA_KEYS):
-        return [int(settings[k]) for k in AREA_KEYS]
-    return None
 
 
 @dataclass
