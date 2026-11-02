@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 from ...core import DRIVERS, current_driver, settings, suggest_tablet_area
 from ...core.drivers import fmt
+from ...core.tablet import TIMING_MIN
 from .. import icons
 from ..theme import theme
 from ..widgets import Button, Card, NumberField, SegmentedControl, clear_layout, hbox, label
@@ -30,6 +31,19 @@ def describe_edge(key, e, driver):
 
 def signed(x):
     return ("+" if x > 0 else "-") + fmt(abs(x))
+
+
+def timing_effect(curve):
+    """'early taps (-40…-25 ms) look 0.19 radius more underaimed, ...' from the outermost measured bins."""
+    parts = []
+    for side, word in ((-1, "early"), (1, "late")):
+        bins = [b for b in curve if b.n >= TIMING_MIN and b.offset and b.lo is not None and b.hi is not None
+                and (b.hi <= 0 if side < 0 else b.lo >= 0)]
+        if bins:
+            b = bins[0] if side < 0 else bins[-1]
+            how = "overaimed" if b.offset > 0 else "underaimed"
+            parts.append(f"{word} taps ({b.lo:+d}…{b.hi:+d} ms) look {abs(b.offset):.2f} radius more {how}")
+    return ",  ".join(parts)
 
 
 class TabletPage(QWidget):
@@ -82,6 +96,13 @@ class TabletPage(QWidget):
         field = Card(title="Where you miss on the playfield")
         field.body.addWidget(label("Overaim = the cursor goes past the note in the jump's direction  ·  "
                                    "underaim = it stops before.", "caption", wrap=True))
+        self.timing_opt = SegmentedControl([(True, "Corrected"), (False, "As tapped")],
+                                           settings.get("tablet_timing", True))
+        self.timing_opt.changed.connect(self._set_timing)
+        field.body.addLayout(hbox(label("Tap timing", "muted"), self.timing_opt, None, spacing=10))
+        field.body.addWidget(label("Corrected = your aim as if every note had been tapped on time: tapping early "
+                                   "catches the cursor before it arrives, late after it went further. An area "
+                                   "can't fix timing, so that part is left out.", "caption", wrap=True))
         self.aim_text = label("", "body", wrap=True)
         field.body.addWidget(self.aim_text)
         self.heatmap = FieldHeatmap()
@@ -131,6 +152,10 @@ class TabletPage(QWidget):
         lbl.setFixedHeight(field.edit.sizeHint().height())
         return lbl
 
+    def _set_timing(self, on):
+        settings.update(tablet_timing=bool(on))
+        self.refresh()
+
     def _set_driver(self, key):
         self.driver = DRIVERS[key]
         settings.update(tablet_driver=key)
@@ -172,7 +197,7 @@ class TabletPage(QWidget):
             return
 
         screen = self.screen_size()
-        s = suggest_tablet_area(self.analyses, area, tablet, screen)
+        s = suggest_tablet_area(self.analyses, area, tablet, screen, on_time=bool(self.timing_opt.value))
         self.tablet_view.set_data(tablet, area, s.suggested)
         self.heatmap.set_suggestion(s)
         self._fill_aim_text(s)
@@ -191,6 +216,13 @@ class TabletPage(QWidget):
                  f"({ms.over_pct:.0f}% overaim)" if ms.total else "No misses where you clicked next to the note."]
         if hs.total:
             lines.append(f"Hits:  {hs.over_pct:.0f}% overaim  ·  {100 - hs.over_pct:.0f}% underaim")
+        t = s.timing
+        if s.n_samples:
+            when = "on time" if abs(t.mean) < 0.5 else f"{abs(t.mean):.0f} ms {'early' if t.mean < 0 else 'late'}"
+            lines.append(f"Tap timing:  {when} on average  ·  {t.early_share * 100:.0f}% of clicks early")
+            effect = timing_effect(t.curve)
+            if effect:
+                lines.append(effect[0].upper() + effect[1:] + ".")
         self.aim_text.setText("\n".join(lines))
 
     def _fill_result(self, s, area, n, screen):
@@ -247,6 +279,15 @@ class TabletPage(QWidget):
         if abs(zr / sr - 1) > 0.05:
             notes.append(f"Computed for an area stretched over the whole {sw}×{sh} screen ({d.stretch_note}). "
                          f"Your area ratio ({zr:.2f}) differs from the screen's ({sr:.2f}).")
+        if not s.on_time:
+            notes.append("Not corrected for tap timing: early taps count as underaim and late ones as overaim.")
+        elif not s.timing.curve:
+            notes.append("Too few on-time taps to measure how your tap timing shifts your aim: not corrected.")
+        elif s.as_tapped != s.suggested:
+            notes.append(f"Corrected for tap timing. As tapped it would be  {d.copy_text(s.as_tapped)}:  "
+                         "that difference comes from tapping early or late, which an area can't fix.")
+        else:
+            notes.append("Checked for tap timing: tapping early or late doesn't change this suggestion.")
         notes.append("Apply it, play a few maps, then analyse again: adjust in small steps.")
         for text in notes:
             why.body.addWidget(label(text, "caption", wrap=True))

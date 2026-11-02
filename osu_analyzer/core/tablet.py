@@ -1,7 +1,8 @@
 """Over / underaim and tablet area calibration."""
 
+import bisect
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 #
 # A tablet maps every pen position to a fixed screen position. For each click we
@@ -35,6 +36,7 @@ class AimSample:
     radius: float
     move_dir: tuple     # unit approach direction, or None
     is_miss: bool
+    timing: float = 0.0  # press - note time (real ms, + = late)
 
     @property
     def along(self):
@@ -44,16 +46,64 @@ class AimSample:
         return (self.err[0] * self.move_dir[0] + self.err[1] * self.move_dir[1]) / self.radius
 
 
+# Tap timing bins (real ms): the error measured on taps in each bin is compared with on-time ones
+TIMING_EDGES = (-40, -25, -15, -5, 5, 15, 25, 40)
+TIMING_MIN = 30     # samples a bin needs for its offset to count
+
+
 def aim_samples(analyses):
     """Hits plus misses where you clicked next to the note (not notelock clicks far away)."""
     out = []
     for a in analyses:
-        for h in a.hits:
-            if h.pos:
-                out.append(AimSample(h.pos, (h.dx, h.dy), h.radius, h.move_dir, False))
-        for m in a.misses:
-            if m.pos and m.reason == "outside" and math.hypot(m.dx, m.dy) < 3 * m.radius:
-                out.append(AimSample(m.pos, (m.dx, m.dy), m.radius, m.move_dir, True))
+        clicks = [(h, False) for h in a.hits if h.pos]
+        clicks += [(m, True) for m in a.misses
+                   if m.pos and m.reason == "outside" and math.hypot(m.dx, m.dy) < 3 * m.radius]
+        for c, miss in clicks:
+            out.append(AimSample(c.pos, (c.dx, c.dy), c.radius, c.move_dir, miss, c.error / a.replay.rate))
+    return out
+
+
+def _bin(t):
+    return bisect.bisect_right(TIMING_EDGES, t)
+
+
+@dataclass
+class TimingBin:
+    lo: float           # real ms, None = open-ended
+    hi: float
+    n: int
+    offset: float       # mean over / underaim compared with on-time taps, radii (+ = more overaim)
+
+
+def timing_curve(samples):
+    """How the over / underaim changes with tap timing, per timing bin. An early tap catches the
+    cursor before it arrives (looks like underaim), a late one after it went further (looks like
+    overaim): that part is timing, not the area. Measured on your own taps, as the link is not
+    linear. [] when there are too few on-time taps to compare with."""
+    groups = [[] for _ in range(len(TIMING_EDGES) + 1)]
+    for s in samples:
+        if s.along is not None:
+            groups[_bin(s.timing)].append(max(-2.0, min(2.0, s.along)))
+    centre = groups[_bin(0)]
+    if len(centre) < TIMING_MIN:
+        return []
+    ref = sum(centre) / len(centre)
+    edges = (None,) + TIMING_EDGES + (None,)
+    return [TimingBin(edges[i], edges[i + 1], len(g),
+                      sum(g) / len(g) - ref if len(g) >= TIMING_MIN else 0.0)
+            for i, g in enumerate(groups)]
+
+
+def tapped_on_time(samples, curve):
+    """The samples as if every note had been tapped on time: the timing part of the error removed."""
+    if not curve:
+        return list(samples)
+    out = []
+    for s in samples:
+        k = curve[_bin(s.timing)].offset * s.radius
+        if s.move_dir and k:
+            s = replace(s, err=(s.err[0] - k * s.move_dir[0], s.err[1] - k * s.move_dir[1]))
+        out.append(s)
     return out
 
 
@@ -132,6 +182,30 @@ class TabletSuggestion:
     miss_split: AimSplit
     hit_split: AimSplit
     regions: list
+    timing: "TapTiming"
+    on_time: bool        # the fit removed the part of the error that comes from tap timing
+    as_tapped: tuple     # what the fit gives without that
+
+
+@dataclass
+class TapTiming:
+    mean: float          # press - note time, real ms (+ = late)
+    early_share: float   # 0..1
+    curve: list          # TimingBin per timing range (see timing_curve), [] if not measured
+    along_tapped: float  # mean over / underaim as tapped, radii (+ = overaim)
+    along_on_time: float  # ... as if tapped on time
+
+
+def _mean_along(samples):
+    v = [s.along for s in samples if s.along is not None]
+    return sum(v) / len(v) if v else 0.0
+
+
+def tap_timing(tapped, corrected, curve):
+    n = len(tapped)
+    return TapTiming(sum(s.timing for s in tapped) / n if n else 0.0,
+                     sum(s.timing < 0 for s in tapped) / n if n else 0.0,
+                     curve, _mean_along(tapped), _mean_along(corrected))
 
 
 def round_step(size):
@@ -180,13 +254,10 @@ def _fit_axis(samples, axis, lo, hi, screen, min_change):
     return EdgeFit(lo, a, se_a, sig_a), EdgeFit(hi, b, se_b, sig_b)
 
 
-def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080), max_change=0.15):
-    """area = (top, bottom, left, right) edges from the tablet's top-left corner, in any unit as long
-    as tablet (width, height) uses the same one (see drivers.py).
-    Assumes the area is mapped to the whole screen (the drivers' default)."""
+def _fit_area(samples, area, tablet, screen, max_change):
+    """(edges, suggested, clamped) for these samples."""
     top, bottom, left, right = area
     step = round_step(tablet[0])
-    samples = aim_samples(analyses)
     fl, fr = _fit_axis(samples, 0, left, right, screen, 2 * step)
     ft, fb = _fit_axis(samples, 1, top, bottom, screen, 2 * step)
 
@@ -205,11 +276,27 @@ def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080
         if hi.suggested <= lo.suggested:    # area outside the tablet: nothing sensible to suggest
             lo.suggested, hi.suggested = lo.current, hi.current
     edges = dict(zip(EDGE_NAMES, (ft, fb, fl, fr)))
-    suggested = (ft.suggested, fb.suggested, fl.suggested, fr.suggested)
+    return edges, (ft.suggested, fb.suggested, fl.suggested, fr.suggested), clamped
 
-    # Replay every click with the new area: same pen position, new screen position
+
+def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080), max_change=0.15,
+                        on_time=True):
+    """area = (top, bottom, left, right) edges from the tablet's top-left corner, in any unit as long
+    as tablet (width, height) uses the same one (see drivers.py).
+    Assumes the area is mapped to the whole screen (the drivers' default).
+    on_time: remove the part of each error that comes from tapping early or late, so it isn't
+    mistaken for under / overaim (an area can't fix timing)."""
+    top, bottom, left, right = area
+    tapped = aim_samples(analyses)
+    curve = timing_curve(tapped)
+    samples = tapped_on_time(tapped, curve) if on_time else tapped
+    edges, suggested, clamped = _fit_area(samples, area, tablet, screen, max_change)
+    as_tapped = _fit_area(tapped, area, tablet, screen, max_change)[1] if on_time else suggested
+    ft, fb, fl, fr = (edges[k] for k in EDGE_NAMES)
+
+    # Replay every real click with the new area: same pen position, new screen position
     fixed = broken = 0
-    for s in samples:
+    for s in tapped:
         tx, ty = s.target
         sx, sy = playfield_to_screen(tx + s.err[0], ty + s.err[1], screen)
         px = left + sx / screen[0] * (right - left)
@@ -224,7 +311,7 @@ def suggest_tablet_area(analyses, area, tablet=(15200, 9500), screen=(1920, 1080
             broken += 1
 
     misses_now = sum(len(a.misses) for a in analyses)
-    return TabletSuggestion(edges, tuple(area), suggested, clamped, len(samples), misses_now,
+    return TabletSuggestion(edges, tuple(area), suggested, clamped, len(tapped), misses_now,
                             misses_now - fixed + broken, fixed, broken,
                             over_under(samples, True), over_under(samples, False),
-                            region_stats(samples))
+                            region_stats(samples), tap_timing(tapped, samples, curve), on_time, as_tapped)
