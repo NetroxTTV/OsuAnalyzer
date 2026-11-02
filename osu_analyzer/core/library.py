@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from .settings import DATA_DIR, INDEX_PATH
+from ..settings import DATA_DIR, INDEX_PATH
 
 
 def find_osu_dir(explicit=None):

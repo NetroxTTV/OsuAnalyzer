@@ -80,7 +80,7 @@ python -m pip install -r requirements.txt pyinstaller
 ./build.ps1
 ```
 
-This produces `osu Hit Analyzer.exe` (single file, no console window) in the project folder.
+This produces `osu Hit Analyzer.exe` (single file, no console window) in the project folder. The recipe is in `build.spec`; `build.ps1` first regenerates `assets/splash.png` from the app's loading screen (`tools/make_splash.py`) so the image shown while the exe unpacks matches it.
 
 Pushing a tag like `v1.0.0` builds the exe on GitHub Actions and attaches it to a draft release. The tag must match `__version__` in `osu_analyzer/__init__.py`.
 
@@ -100,6 +100,8 @@ osu_analyzer/
     main_window.py      wires the sidebar, the analysis controller and the pages together
   audio.py              music playback for the viewer
   plot.py, cli.py       matplotlib plot used by the command line
+tools/make_splash.py    renders assets/splash.png from the loading screen
+build.spec, build.ps1   exe build
 ```
 
 ## Where data is stored

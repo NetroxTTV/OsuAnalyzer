@@ -2,15 +2,11 @@
 # Requires: python -m pip install -r requirements.txt pyinstaller
 Set-Location $PSScriptRoot
 
-python -m PyInstaller --noconfirm --clean --onefile --windowed `
-    --name "osu Hit Analyzer" `
-    --icon assets/icon.ico `
-    --splash assets/splash.png `
-    --add-data "assets/icon.ico;assets" `
-    --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 `
-    --exclude-module matplotlib `
-    --exclude-module IPython --exclude-module pytest `
-    gui.py
+# The exe's splash image is the first frame of the app's loading screen
+python tools/make_splash.py
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+python -m PyInstaller --noconfirm --clean build.spec
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 try {

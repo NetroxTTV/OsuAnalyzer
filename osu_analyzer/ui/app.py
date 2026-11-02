@@ -59,7 +59,7 @@ def selftest(out_png, replay):
     """Headless check of the packaged app: analyse a replay and save the analyzer page, no window."""
     from ..core import OsuInstall, ReplayLoader
     from .analyzer import AnalyzerPage
-    create_app([sys.argv[0], "-platform", "offscreen"])
+    create_app([sys.argv[0]])
     a = ReplayLoader(OsuInstall.detect()).analyse(replay)
     page = AnalyzerPage()
     page.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
@@ -83,10 +83,18 @@ def main():
         QMessageBox.critical(None, "Error", "".join(traceback.format_exception(exc, val, tb))[-2000:])
     sys.excepthook = report
 
+    from .loading import LoadingScreen
+    loading = LoadingScreen()
+    loading.show_centered()
+    close_splash()        # the exe's static splash: this window takes its place
+    loading.import_modules("Loading the analysis engine...", 0.25, ["numpy", "osu_analyzer.core"])
+    loading.import_modules("Loading the interface...", 0.5, ["osu_analyzer.ui.main_window"])
+
     from .main_window import MainWindow
     files = [a for a in sys.argv[1:] if a.lower().endswith(".osr")]
-    window = MainWindow(files)
+    window = MainWindow(files, progress=loading.step)
     dark_title_bar(window)
-    close_splash()
     window.showMaximized()
+    loading.raise_()
+    loading.finish()
     return app.exec()

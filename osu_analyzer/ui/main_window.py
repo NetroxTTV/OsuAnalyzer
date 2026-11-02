@@ -23,8 +23,11 @@ PAGES = [("viewer", "Replay Viewer", icons.VIDEO), ("analyzer", "Hit Analyzer", 
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, initial_files=()):
+    def __init__(self, initial_files=(), progress=None):
+        """progress(text, fraction) reports start-up steps (to the loading screen)."""
         super().__init__()
+        progress = progress or (lambda _text, _fraction: None)
+        progress("Finding your osu! folder...", 0.6)
         self.setWindowTitle(f"osu! Hit Analyzer {__version__}")
         self.setMinimumSize(1180, 740)
         self.setAcceptDrops(True)
@@ -70,6 +73,7 @@ class MainWindow(QMainWindow):
         box.addWidget(self.stack)
         col.addWidget(self.pages_box, 1)
 
+        progress("Building the window...", 0.7)
         self.viewer = ViewerPage()
         self.analyzer = AnalyzerPage()
         self.tablet = TabletPage(self._screen_size)
@@ -85,6 +89,7 @@ class MainWindow(QMainWindow):
 
         self._connect()
         self._shortcuts()
+        progress("Reading your replays...", 0.85)
         self.library.refresh()
         self.settings.set_folder(self.library.install.root if self.library.install else None)
         self.show_page("viewer")

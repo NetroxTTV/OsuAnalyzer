@@ -25,7 +25,7 @@ class KeyTimelineRenderer:
     """Scrolling strip: K1 presses / notes with their 300-100-50 windows / K2 presses,
     plus the two keys on the right (lit while held, with their press count)."""
 
-    HEIGHT = 86
+    HEIGHT = 100
     KEYS_W = 84
 
     def paint(self, p, rect, scene, t):
@@ -37,24 +37,25 @@ class KeyTimelineRenderer:
         cx = (x0 + x1) / 2
         pxms = (x1 - x0) / 2 / win
         y = strip.y() + 8
-        lanes = {"ruler": (y, y + 8), KEY_LEFT: (y + 11, y + 29), "notes": (y + 32, y + 50),
-                 KEY_RIGHT: (y + 53, y + 71)}
+        # Notes alternate between two rows so that close notes (streams) don't overlap
+        rows = ((y + 32, y + 47), (y + 49, y + 64))
+        lanes = {"ruler": (y, y + 8), KEY_LEFT: (y + 11, y + 29), "notes": (rows[0][0], rows[1][1]),
+                 KEY_RIGHT: (y + 67, y + 85)}
 
         def X(ms):
             return min(x1, max(x0, cx + (ms - t) * pxms))
 
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(qcolor("#ffffff", 0.035))
-        for name, (a, b) in lanes.items():
-            if name != "ruler":
-                p.drawRoundedRect(QRectF(x0, a, x1 - x0, b - a), 5, 5)
+        for a, b in (lanes[KEY_LEFT], *rows, lanes[KEY_RIGHT]):
+            p.drawRoundedRect(QRectF(x0, a, x1 - x0, b - a), 5, 5)
 
         # Ruler: a tick every 100 ms of map time
-        ra, rb = lanes["ruler"]
+        ruler = lanes["ruler"][1]
         tick = QPen(qcolor("#ffffff", 0.3), 1)
         p.setPen(tick)
         first = math.ceil((t - win) / 100) * 100
-        p.drawLines([QLineF(X(ms), rb - (6 if ms % 500 == 0 else 3), X(ms), rb)
+        p.drawLines([QLineF(X(ms), ruler - (6 if ms % 500 == 0 else 3), X(ms), ruler)
                      for ms in range(int(first), int(t + win) + 1, 100)])
 
         # Notes: 50 / 100 / 300 windows, outline = result, dark line = exact note time
@@ -62,24 +63,25 @@ class KeyTimelineRenderer:
         lo = bisect.bisect_left(scene.obj_times, t - win - w50 - scene.max_len)
         hi = bisect.bisect_right(scene.obj_times, t + win + w50)
         result_colours = {**JUDGE_COLORS, 0: theme.miss}
-        for o in scene.objs[lo:hi]:
+        for i, o in enumerate(scene.objs[lo:hi], lo):
+            ra, rb = rows[i % 2]
             if o.kind != "circle" and o.end_time >= t - win:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(qcolor("#ffffff", 0.3))
-                p.drawRoundedRect(QRectF(X(o.time), (na + nb) / 2 - 2, X(o.end_time) - X(o.time), 4), 2, 2)
+                p.drawRoundedRect(QRectF(X(o.time), (ra + rb) / 2 - 2, X(o.end_time) - X(o.time), 4), 2, 2)
             if o.kind == "spinner" or o.time + w50 < t - win:
                 continue
             p.setPen(Qt.PenStyle.NoPen)
             for wnd, shade in ((w50, 0.10), (w100, 0.22), (w300, 0.7)):
                 p.setBrush(qcolor("#ffffff", shade))
-                p.drawRoundedRect(QRectF(X(o.time - wnd), na, X(o.time + wnd) - X(o.time - wnd), nb - na), 4, 4)
+                p.drawRoundedRect(QRectF(X(o.time - wnd), ra, X(o.time + wnd) - X(o.time - wnd), rb - ra), 4, 4)
             res = scene.result.get(id(o))
             if res is not None:
                 p.setPen(QPen(qcolor(result_colours[res]), 2))
                 p.setBrush(Qt.BrushStyle.NoBrush)
-                p.drawRoundedRect(QRectF(X(o.time - w300), na, X(o.time + w300) - X(o.time - w300), nb - na), 4, 4)
+                p.drawRoundedRect(QRectF(X(o.time - w300), ra, X(o.time + w300) - X(o.time - w300), rb - ra), 4, 4)
             p.setPen(QPen(qcolor("#000000", 0.6), 1))
-            p.drawLine(QPointF(X(o.time), na + 2), QPointF(X(o.time), nb - 2))
+            p.drawLine(QPointF(X(o.time), ra + 2), QPointF(X(o.time), rb - 2))
 
         # Key presses: bar while held + a tick at the press reaching into the note lane
         keys_now = scene.cursor.at(t)[2]

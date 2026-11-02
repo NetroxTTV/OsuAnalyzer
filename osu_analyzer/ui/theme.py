@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from .. import palette
-from ..core.settings import settings
+from ..settings import settings
 
 FONT_FAMILIES = ("Segoe UI Variable Text", "Segoe UI", "Inter", "Helvetica Neue", "Arial")
 
@@ -58,10 +58,14 @@ class Theme(QObject):
     def accent_pressed(self):
         return mix(self.accent, "#000000", 0.12)
 
+    @staticmethod
+    def ink_on(colour):
+        """Text colour readable on `colour`."""
+        return QColor("#14141a") if qcolor(colour).lightnessF() > 0.55 else QColor("#ffffff")
+
     @property
     def on_accent(self):
-        """Text colour readable on the accent."""
-        return QColor("#14141a") if self.accent.lightnessF() > 0.55 else QColor("#ffffff")
+        return self.ink_on(self.accent)
 
     def accent_soft(self, alpha=0.16):
         return qcolor(self.accent, alpha)

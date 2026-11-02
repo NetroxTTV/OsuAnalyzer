@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (QAbstractListModel, QItemSelection, QItemSelectionModel, QModelIndex,
                             QPointF, QRectF, QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import QFontMetricsF, QLinearGradient
+from PySide6.QtGui import QFontMetricsF
 from PySide6.QtWidgets import (QAbstractItemView, QListView, QStyle, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
 
@@ -12,7 +12,7 @@ from .. import __version__
 from ..core import replay_label
 from . import icons
 from .theme import qcolor, theme
-from .widgets import Button, Chip, IconButton, SearchField, Surface, hbox, label, painter
+from .widgets import BrandMark, Button, Chip, IconButton, SearchField, Surface, hbox, label
 
 ROW_HEIGHT = 60
 
@@ -109,35 +109,6 @@ class ReplayListView(QListView):
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setItemDelegate(ReplayDelegate(self))
-
-
-class BrandMark(QWidget):
-    """App logo: a hit circle with the average-hit cross, on an accent tile."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(36, 36)
-
-    def paintEvent(self, _e):
-        p = painter(self)
-        r = QRectF(self.rect())
-        g = QLinearGradient(0, 0, r.width(), r.height())
-        g.setColorAt(0, theme.accent_hover)
-        g.setColorAt(1, theme.accent_pressed)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(g)
-        p.drawRoundedRect(r, 10, 10)
-        c = r.center()
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        pen = p.pen()
-        pen.setColor(theme.on_accent)
-        pen.setWidthF(2.2)
-        pen.setStyle(Qt.PenStyle.SolidLine)
-        p.setPen(pen)
-        p.drawEllipse(c, 10, 10)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.on_accent)
-        p.drawEllipse(QPointF(c.x() + 3, c.y() - 2), 3, 3)
 
 
 class Sidebar(Surface):
