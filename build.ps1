@@ -7,7 +7,8 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --icon assets/icon.ico `
     --splash assets/splash.png `
     --add-data "assets/icon.ico;assets" `
-    --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 --exclude-module PySide6 `
+    --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 `
+    --exclude-module matplotlib `
     --exclude-module IPython --exclude-module pytest `
     gui.py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

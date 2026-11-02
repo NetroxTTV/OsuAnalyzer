@@ -1,6 +1,7 @@
-matplotlib
+PySide6
 numpy
 pillow
 miniaudio
 sounddevice
 audiotsm
+matplotlib

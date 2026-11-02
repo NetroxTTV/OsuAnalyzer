@@ -24,9 +24,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          $v = python -c "import osu_hit_analyzer as m; print(m.__version__)"
+          $v = python -c "import osu_analyzer as m; print(m.__version__)"
           if ("v$v" -ne "${{ github.ref_name }}") {
-            Write-Error "Tag ${{ github.ref_name }} does not match __version__ $v in osu_hit_analyzer.py"
+            Write-Error "Tag ${{ github.ref_name }} does not match __version__ $v in osu_analyzer/__init__.py"
             exit 1
           }
 
