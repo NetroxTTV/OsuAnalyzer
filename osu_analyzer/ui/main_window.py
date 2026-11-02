@@ -1,25 +1,29 @@
 """Main window: sidebar on the left, navigation + pages on the right. Wires the library,
 the analysis controller and the pages together (they don't know about each other)."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from .. import __version__
-from ..core import replay_label, settings
+from ..core import History, current_tablet_area, replay_label, settings
 from . import icons
 from .analyzer import AnalyzerPage
 from .controller import AnalysisController
+from .history import HistoryPage
 from .library import ReplayLibrary
 from .settings_page import SettingsPage
 from .sidebar import Sidebar
 from .tablet import TabletPage
+from .updates import UpdateChecker
 from .viewer import ViewerPage
 from .widgets import IconButton, LoadingOverlay, SegmentedControl, Surface, hbox, label, set_role
 
 PAGES = [("viewer", "Replay Viewer", icons.VIDEO), ("analyzer", "Hit Analyzer", icons.TARGET),
-         ("tablet", "Tablet Zone", icons.PEN)]
+         ("tablet", "Tablet Zone", icons.PEN), ("history", "History", icons.HISTORY)]
 
 
 class MainWindow(QMainWindow):
@@ -38,6 +42,8 @@ class MainWindow(QMainWindow):
         self.library = ReplayLibrary(self)
         self.controller = AnalysisController(self.library, self)
         self.controller.ask_beatmap = self._ask_beatmap
+        self.history = History()
+        self.updater = UpdateChecker(self)
 
         root = QWidget(objectName="Root")
         self.setCentralWidget(root)
@@ -77,9 +83,10 @@ class MainWindow(QMainWindow):
         self.viewer = ViewerPage()
         self.analyzer = AnalyzerPage()
         self.tablet = TabletPage(self._screen_size)
-        self.settings = SettingsPage(self.library.auto_load, self.viewer.bg_dim)
+        self.history_page = HistoryPage(self.history, self.library)
+        self.settings = SettingsPage(self.library.auto_load, self.viewer.bg_dim, self.updater)
         self.pages = {"viewer": self.viewer, "analyzer": self.analyzer, "tablet": self.tablet,
-                      "settings": self.settings}
+                      "history": self.history_page, "settings": self.settings}
         for w in self.pages.values():
             self.stack.addWidget(w)
         self.overlay = LoadingOverlay(self.pages_box)
@@ -95,6 +102,8 @@ class MainWindow(QMainWindow):
         self.show_page("viewer")
         if initial_files:
             self.open_paths(initial_files)
+        if settings.get("check_updates", True):
+            QTimer.singleShot(2500, self.updater.check)
 
     # ------------------------------------------------------------ wiring --
 
@@ -116,8 +125,12 @@ class MainWindow(QMainWindow):
 
         self.analyzer.picked.connect(self._watch_note)
         self.analyzer.sliderHeadsChanged.connect(ctl.set_slider_heads)
+        self.analyzer.sliderHeadsChanged.connect(lambda on: setattr(self.history_page, "slider_heads", on))
         self.analyzer.saveRequested.connect(self.save_image)
         self.tablet.message.connect(self.set_status)
+        self.history_page.message.connect(self.set_status)
+        self.history_page.openRequested.connect(self._open_from_history)
+        self.updater.finished.connect(self._update_checked)
 
         self.settings.refreshRequested.connect(self.refresh_all)
         self.settings.chooseFolderRequested.connect(self.choose_osu_dir)
@@ -142,6 +155,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.pages[key])
         self.nav.set_value(key if key != "settings" else None)
         self.settings_btn.set_active(key == "settings")
+        if key == "settings":
+            self.settings_btn.set_badge(False)
         self.viewer.set_active(key == "viewer")
         if key in self._dirty:
             self._dirty.discard(key)
@@ -163,7 +178,8 @@ class MainWindow(QMainWindow):
         analyses = result.analyses
         self.overlay.set_status("Drawing...")
         self.viewer.set_analyses(analyses)
-        self._dirty = {"analyzer", "tablet"}
+        self._record_history(analyses)
+        self._dirty = {"analyzer", "tablet", "history"}
         if self.page in self._dirty:
             self._dirty.discard(self.page)
             self.pages[self.page].set_analyses(analyses)
@@ -184,6 +200,29 @@ class MainWindow(QMainWindow):
         if result.errors:
             text += "   ·   skipped: " + "; ".join(result.errors)
         self.set_status(text, warning=bool(result.errors))
+
+    def _record_history(self, analyses):
+        """Keep a summary of each analysed replay. The tablet area is only known for plays
+        from the last day (older ones may have been played with another area)."""
+        recent = datetime.now(timezone.utc) - timedelta(days=1)
+        for a in analyses:
+            played = a.replay.played_at
+            area = current_tablet_area() if played and played >= recent else None
+            self.history.record(a, self.controller.include_slider_heads, area, save=False)
+        if analyses:
+            self.history.save()
+
+    def _open_from_history(self, path):
+        if not Path(path).exists():
+            self.set_status(f"Replay file not found: {path}", warning=True)
+            return
+        self.open_paths([path])
+        self.show_page("analyzer")
+
+    def _update_checked(self, release, _error):
+        if release and release.is_newer and self.page != "settings":
+            self.settings_btn.set_badge(True)
+            self.set_status(f"Version {release.version} is available: open Settings to download it")
 
     def _watch_note(self, analysis, obj):
         self.show_page("viewer")
@@ -270,5 +309,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.viewer.shutdown()
+        self.history_page.shutdown()
         super().closeEvent(e)
 

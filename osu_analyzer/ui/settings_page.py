@@ -5,11 +5,12 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 
 from .. import __version__
-from ..core import DATA_DIR
+from ..core import DATA_DIR, settings
 from ..palette import ACCENTS
+from ..updates import RELEASES_PAGE
 from . import icons
 from .theme import theme
-from .widgets import Button, Card, SegmentedControl, Swatches, label
+from .widgets import Button, Card, SegmentedControl, Swatches, hbox, label, set_role
 
 BG_LEVELS = [(0.0, "Off"), (0.1, "Darker"), (0.16, "Dark"), (0.26, "Dim")]
 
@@ -20,8 +21,9 @@ class SettingsPage(QWidget):
     autoLoadChanged = Signal(bool)
     bgDimChanged = Signal(float)
 
-    def __init__(self, auto_load, bg_dim, parent=None):
+    def __init__(self, auto_load, bg_dim, updater, parent=None):
         super().__init__(parent)
+        self.updater = updater
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -65,6 +67,22 @@ class SettingsPage(QWidget):
         dim.changed.connect(lambda v: self.bgDimChanged.emit(float(v)))
         self._row("Viewer background", "How visible the beatmap background is behind the replay.", dim)
 
+        self._section("Updates")
+        self.update_text = label("", "caption", wrap=True)
+        self.check_btn = Button("Check now", icons.REFRESH)
+        self.check_btn.clicked.connect(self.check_updates)
+        self.download_btn = Button("Download", icons.DOWNLOAD, "primary")
+        self.download_btn.clicked.connect(self._open_release)
+        self.download_btn.hide()
+        controls = QWidget()
+        controls.setLayout(hbox(self.download_btn, self.check_btn, spacing=8))
+        self._row("Check for updates", self.update_text, controls)
+        startup = SegmentedControl([(True, "On"), (False, "Off")], settings.get("check_updates", True))
+        startup.changed.connect(lambda v: settings.update(check_updates=bool(v)))
+        self._row("Check at startup", "Look for a new version on GitHub each time the app starts.", startup)
+        updater.finished.connect(self._update_result)
+        self._show_release(updater.release)
+
         self._section("About")
         open_data = Button("Open folder", icons.FOLDER)
         open_data.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(DATA_DIR))))
@@ -90,6 +108,43 @@ class SettingsPage(QWidget):
         card.body.addLayout(row)
         self.col.addWidget(card)
         return card
+
+    # ------------------------------------------------------------ updates --
+
+    def check_updates(self):
+        self.check_btn.setEnabled(False)
+        self.check_btn.setText("Checking...")
+        self.update_text.setText("Asking GitHub for the latest version...")
+        set_role(self.update_text, "caption")
+        self.updater.check()
+
+    def _update_result(self, release, error):
+        self.check_btn.setEnabled(True)
+        self.check_btn.setText("Check now")
+        if error:
+            self.update_text.setText(f"Couldn't check for updates: {error}.")
+            self.update_text.setToolTip(self.updater.error_detail)
+            set_role(self.update_text, "warning")
+            return
+        self.update_text.setToolTip("")
+        self._show_release(release)
+
+    def _show_release(self, release):
+        set_role(self.update_text, "caption")
+        newer = bool(release and release.is_newer)
+        self.download_btn.setVisible(newer)
+        if newer:
+            self.download_btn.setText(f"Download {release.version}")
+            self.download_btn.adjustSize()
+            self.update_text.setText(f"Version {release.version} is available. You have {__version__}.")
+        elif release:
+            self.update_text.setText(f"You're up to date ({__version__}). Latest release: {release.version}.")
+        else:
+            self.update_text.setText(f"You have version {__version__}.")
+
+    def _open_release(self):
+        release = self.updater.release
+        QDesktopServices.openUrl(QUrl(release.url if release else RELEASES_PAGE))
 
     def set_folder(self, path):
         self.folder_text.setText(str(path) if path else "Not found: choose it with Change...")

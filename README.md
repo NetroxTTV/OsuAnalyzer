@@ -31,16 +31,23 @@ Grab **`osu-Hit-Analyzer.exe`** from the [latest release](https://github.com/Net
 - Shows where on the playfield you overaim or underaim
 - Suggests a corrected tablet area (top / bottom / left / right, in tablet points as in Wacom Center) from your systematic aim errors
 
+### History
+- Every analysed replay is saved: follow your unstable rate, accuracy, aim offset, timing and misses over time
+- Rolling average, comparison of your last 10 replays with the 10 before, and markers where your tablet area changed
+- "Add recent replays" fills it from your 50 newest plays; click any point or row to open that replay
+
 ### Quality of life
 - New replays load automatically as soon as osu! saves them (F2 after a play)
+- Replay list shows grade, accuracy, mods and misses at a glance
 - Filter replays by map, difficulty or player, or drag & drop `.osr` files onto the window
 - Custom accent colour (applied instantly) and beatmap background dim
+- Checks GitHub for new versions (Settings → Updates)
 
 ## Keyboard shortcuts
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Replay Viewer / Hit Analyzer / Tablet Zone |
+| `Ctrl+1` … `Ctrl+4` | Replay Viewer / Hit Analyzer / Tablet Zone / History |
 | `Ctrl+,` | Settings |
 | `Ctrl+O` | Open replay files |
 | `Ctrl+F` | Filter the replay list |
@@ -97,6 +104,7 @@ osu_analyzer/
     viewer/             Replay Viewer: scene, playback clock, renderers, seek bar, page
     analyzer/           Hit Analyzer: hit scatter, charts, page
     tablet/             Tablet Zone
+    history/            History: progress chart, table, import of recent replays
     main_window.py      wires the sidebar, the analysis controller and the pages together
   audio.py              music playback for the viewer
   plot.py, cli.py       matplotlib plot used by the command line
@@ -106,7 +114,7 @@ build.spec, build.ps1   exe build
 
 ## Where data is stored
 
-The app keeps a beatmap index (so lookups are instant after the first scan) and your settings in `%LOCALAPPDATA%\osu-hit-analyzer\`. Delete that folder to reset everything. Your osu! files are only ever read, never modified.
+The app keeps a beatmap index (so lookups are instant after the first scan), your history and your settings in `%LOCALAPPDATA%\osu-hit-analyzer\`. Delete that folder to reset everything. Your osu! files are only ever read, never modified.
 
 ## License
 

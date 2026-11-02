@@ -9,23 +9,27 @@ from PySide6.QtWidgets import (QAbstractItemView, QListView, QStyle, QStyledItem
                                QWidget)
 
 from .. import __version__
-from ..core import replay_label
+from ..core import MODE_NAMES, read_replay_header, replay_label
+from ..palette import GRADE_COLORS
 from . import icons
 from .theme import qcolor, theme
 from .widgets import BrandMark, Button, Chip, IconButton, SearchField, Surface, hbox, label
 
-ROW_HEIGHT = 60
+ROW_HEIGHT = 62
 
 
 class ReplayListModel(QAbstractListModel):
-    """Replay paths with their display labels (title, subtitle, date)."""
+    """Replay paths with their display labels (title, subtitle, date) and, read on demand
+    for the rows on screen, their header (accuracy, grade, mods, combo)."""
 
     LabelRole = Qt.ItemDataRole.UserRole + 1
+    HeaderRole = Qt.ItemDataRole.UserRole + 2
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.paths = []
         self._labels = {}
+        self._headers = {}     # path -> Replay header, or None when unreadable
 
     def set_paths(self, paths):
         self.beginResetModel()
@@ -34,6 +38,14 @@ class ReplayListModel(QAbstractListModel):
             if p not in self._labels:
                 self._labels[p] = replay_label(p)
         self.endResetModel()
+
+    def header(self, p):
+        if p not in self._headers:
+            try:
+                self._headers[p] = read_replay_header(p)
+            except (OSError, ValueError, EOFError):
+                self._headers[p] = None
+        return self._headers[p]
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.paths)
@@ -44,27 +56,43 @@ class ReplayListModel(QAbstractListModel):
         p = self.paths[index.row()]
         if role == self.LabelRole:
             return self._labels[p]
+        if role == self.HeaderRole:
+            return self.header(p)
         if role == Qt.ItemDataRole.DisplayRole:
             return self._labels[p][0]
         if role == Qt.ItemDataRole.ToolTipRole:
-            return p.name
+            return self._tooltip(p)
         return None
+
+    def _tooltip(self, p):
+        h = self.header(p)
+        if h is None:
+            return p.name
+        if h.mode != 0:
+            return f"{p.name}\n{MODE_NAMES.get(h.mode, 'other mode')} replay (only osu!standard is analysed)"
+        return (f"{p.name}\n{h.accuracy * 100:.2f}%  ·  {h.grade}  ·  {h.max_combo}x combo  ·  +{h.mod_string}\n"
+                f"300: {h.n300}   100: {h.n100}   50: {h.n50}   miss: {h.nmiss}")
 
 
 class ReplayDelegate(QStyledItemDelegate):
-    """Rounded rows: title, 'difficulty · player' and the date."""
+    """Rounded rows: grade badge, title + accuracy, 'difficulty · player' + mods, misses and date."""
+
+    BADGE = 32
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.f_title = theme.semibold(10)
         self.f_sub = theme.font(9)
-        self.f_date = theme.font(8.5)
+        self.f_grade = theme.bold(10)
+        self.f_acc = theme.semibold(9.5)
 
     def sizeHint(self, _option, _index):
         return QSize(200, ROW_HEIGHT)
 
     def paint(self, p, option, index):
         title, sub, date = index.data(ReplayListModel.LabelRole)
+        h = index.data(ReplayListModel.HeaderRole)
+        standard = h is not None and h.mode == 0
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         r = QRectF(option.rect).adjusted(6, 2, -6, -2)
@@ -80,20 +108,47 @@ class ReplayDelegate(QStyledItemDelegate):
             p.setBrush(qcolor("#ffffff", 0.045))
             p.drawRoundedRect(r, 10, 10)
 
-        x0, x1 = r.x() + 16, r.right() - 12
-        fm_t, fm_s, fm_d = QFontMetricsF(self.f_title), QFontMetricsF(self.f_sub), QFontMetricsF(self.f_date)
-        dw = fm_d.horizontalAdvance(date) + 10 if date else 0
+        # Grade badge
+        badge = QRectF(r.x() + 12, r.center().y() - self.BADGE / 2, self.BADGE, self.BADGE)
+        grade = h.grade if standard else ("–" if h is not None else "?")
+        colour = qcolor(GRADE_COLORS.get(grade, theme.muted.name()))
+        p.setBrush(qcolor(colour, 0.15) if standard else qcolor("#ffffff", 0.05))
+        p.drawRoundedRect(badge, 9, 9)
+        p.setFont(self.f_grade)
+        p.setPen(colour if standard else theme.subtle)
+        p.drawText(badge, Qt.AlignmentFlag.AlignCenter, grade.replace("H", ""))
+
+        x0, x1 = badge.right() + 12, r.right() - 12
+        fm_t, fm_s, fm_a = QFontMetricsF(self.f_title), QFontMetricsF(self.f_sub), QFontMetricsF(self.f_acc)
+        y1, y2 = r.y() + 25, r.y() + 44
+
+        # Line 1: title ............ accuracy
+        acc = f"{h.accuracy * 100:.2f}%" if standard else (MODE_NAMES.get(h.mode, "") if h else "")
+        aw = fm_a.horizontalAdvance(acc) + 10 if acc else 0
+        p.setFont(self.f_acc)
+        p.setPen(theme.text if standard else theme.subtle)
+        p.drawText(QRectF(x1 - aw, y1 - 14, aw, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   acc)
         p.setFont(self.f_title)
         p.setPen(theme.text)
-        p.drawText(QPointF(x0, r.y() + 24), fm_t.elidedText(title, Qt.TextElideMode.ElideRight, x1 - x0 - dw))
-        p.setFont(self.f_sub)
-        p.setPen(theme.accent if selected else theme.muted)
-        p.drawText(QPointF(x0, r.y() + 43), fm_s.elidedText(sub, Qt.TextElideMode.ElideRight, x1 - x0))
+        p.drawText(QPointF(x0, y1), fm_t.elidedText(title, Qt.TextElideMode.ElideRight, x1 - x0 - aw))
+
+        # Line 2: difficulty · player ............ +mods · misses · date
+        right = []
+        if standard and h.mod_string != "NM":
+            right.append(f"+{h.mod_string}")
+        if standard and h.nmiss:
+            right.append(f"{h.nmiss}✕")
         if date:
-            p.setFont(self.f_date)
-            p.setPen(theme.subtle if not selected else theme.muted)
-            p.drawText(QRectF(x1 - dw, r.y() + 10, dw, 18),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, date)
+            right.append(date)
+        right = "  ·  ".join(right)
+        rw = fm_s.horizontalAdvance(right) + 10 if right else 0
+        p.setFont(self.f_sub)
+        p.setPen(theme.muted)
+        p.drawText(QRectF(x1 - rw, y2 - 13, rw, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   right)
+        p.setPen(theme.accent if selected else theme.muted)
+        p.drawText(QPointF(x0, y2), fm_s.elidedText(sub, Qt.TextElideMode.ElideRight, x1 - x0 - rw))
         p.restore()
 
 

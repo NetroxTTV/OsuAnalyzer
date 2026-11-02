@@ -21,3 +21,7 @@ EARLY_BLUE = "#4f9dff"  # timing colour scale: early -> on time -> late
 LATE_RED = "#ff5470"
 K1_COLOR = "#f0a030"
 K2_COLOR = "#3fcf6a"
+GOOD = "#3ddc97"         # improving (with an arrow, never colour alone)
+BAD = MISS_RED          # getting worse
+GRADE_COLORS = {"SS": "#ffd84d", "S": "#ffb347", "A": "#7ed957", "B": "#5ac8fa", "C": "#b48cff",
+                "D": "#ff5c6c", "SSH": "#d9e2ec", "SH": "#d9e2ec"}

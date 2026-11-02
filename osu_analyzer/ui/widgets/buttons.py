@@ -1,7 +1,7 @@
 """Buttons: text / icon buttons in three variants, and the round play button."""
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QFontMetricsF, QPainterPath
+from PySide6.QtGui import QFontMetricsF, QPainterPath, QPen
 from PySide6.QtWidgets import QAbstractButton, QSizePolicy
 
 from .. import icons
@@ -88,6 +88,11 @@ class IconButton(Button):
         self.setToolTip(tooltip)
         self._size = size
         self.active = active
+        self.badge = False      # small accent dot: something new behind this button
+
+    def set_badge(self, on):
+        self.badge = on
+        self.update()
 
     def sizeHint(self):
         return QSize(self._size, self._size)
@@ -105,6 +110,10 @@ class IconButton(Button):
         p.setBrush(bg)
         p.drawRoundedRect(QRectF(self.rect()), 8, 8)
         icons.draw_icon(p, self.rect(), self.glyph, fg, self._size * 0.45)
+        if self.badge:
+            p.setPen(QPen(theme.surface, 2))
+            p.setBrush(theme.accent)
+            p.drawEllipse(QPointF(self.width() - 8, 8), 4, 4)
 
 
 class PlayButton(QAbstractButton):

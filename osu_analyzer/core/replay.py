@@ -3,7 +3,8 @@
 import bisect
 import lzma
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 MOD_NAMES = [
@@ -11,7 +12,8 @@ MOD_NAMES = [
     (64, "DT"), (128, "RX"), (256, "HT"), (512, "NC"), (1024, "FL"),
     (2048, "AT"), (4096, "SO"), (8192, "AP"), (16384, "PF"),
 ]
-MOD_EZ, MOD_HR, MOD_DT, MOD_HT, MOD_NC = 2, 16, 64, 256, 512
+MOD_EZ, MOD_HD, MOD_HR, MOD_DT, MOD_HT, MOD_NC, MOD_FL = 2, 8, 16, 64, 256, 512, 1024
+MODE_NAMES = {0: "osu!", 1: "osu!taiko", 2: "osu!catch", 3: "osu!mania"}
 
 KEY_LEFT = 1 | 4    # M1 | K1
 KEY_RIGHT = 2 | 8   # M2 | K2
@@ -78,7 +80,9 @@ class Replay:
     nmiss: int
     max_combo: int
     mods: int
-    frames: list  # (time, x, y, keys)
+    frames: list = field(default_factory=list)   # (time, x, y, keys); empty for a header-only read
+    replay_md5: str = ""
+    played_at: datetime = None                    # UTC; None for a header-only read
 
     @property
     def mod_string(self):
@@ -97,29 +101,64 @@ class Replay:
             return 0.75
         return 1.0
 
+    @property
+    def accuracy(self):
+        """osu!standard accuracy, 0..1."""
+        total = self.n300 + self.n100 + self.n50 + self.nmiss
+        return (300 * self.n300 + 100 * self.n100 + 50 * self.n50) / (300 * total) if total else 0.0
 
-def read_replay(path) -> Replay:
-    path = Path(path)
-    r = _Reader(path.read_bytes())
+    @property
+    def grade(self):
+        """osu!standard grade: SS, S, A, B, C, D (SSH / SH = silver, with HD or FL)."""
+        total = self.n300 + self.n100 + self.n50 + self.nmiss
+        if not total:
+            return "D"
+        p300, p50 = self.n300 / total, self.n50 / total
+        if p300 == 1:
+            g = "SS"
+        elif p300 > 0.9 and p50 <= 0.01 and not self.nmiss:
+            g = "S"
+        elif (p300 > 0.8 and not self.nmiss) or p300 > 0.9:
+            g = "A"
+        elif (p300 > 0.7 and not self.nmiss) or p300 > 0.8:
+            g = "B"
+        elif p300 > 0.6:
+            g = "C"
+        else:
+            g = "D"
+        return g + "H" if g in ("SS", "S") and self.mods & (MOD_HD | MOD_FL) else g
+
+
+def _ticks_to_datetime(ticks):
+    """.NET DateTime ticks (100 ns since 0001-01-01) -> UTC datetime, or None."""
+    try:
+        return datetime(1, 1, 1, tzinfo=timezone.utc) + timedelta(microseconds=ticks // 10)
+    except (OverflowError, ValueError):
+        return None
+
+
+def _read(r, path, with_frames):
     mode = r.byte()
     version = r.int()
     beatmap_md5 = r.string()
     player = r.string()
-    r.string()  # replay md5
+    replay_md5 = r.string()
     n300, n100, n50, _geki, _katu, nmiss = (r.short() for _ in range(6))
     r.int()  # score
     max_combo = r.short()
     r.byte()  # perfect
     mods = r.int()
+    replay = Replay(path, mode, version, beatmap_md5, player, n300, n100, n50, nmiss, max_combo, mods,
+                    replay_md5=replay_md5)
+    if not with_frames:
+        return replay
     r.string()  # life bar graph
-    r.long()  # timestamp
+    replay.played_at = _ticks_to_datetime(r.long())
     length = r.int()
     compressed = r.raw(length)
 
     text = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE).decompress(compressed)
     text = text.decode("ascii", "replace")
-
-    frames = []
     t = 0
     for chunk in text.split(","):
         parts = chunk.split("|")
@@ -130,12 +169,26 @@ def read_replay(path) -> Replay:
             if w == -12345:  # RNG seed frame
                 continue
             t += w
-            frames.append((t, float(parts[1]), float(parts[2]), int(float(parts[3]))))
+            replay.frames.append((t, float(parts[1]), float(parts[2]), int(float(parts[3]))))
         except ValueError:
             continue
+    return replay
 
-    return Replay(path, mode, version, beatmap_md5, player,
-                  n300, n100, n50, nmiss, max_combo, mods, frames)
+
+def read_replay(path) -> Replay:
+    path = Path(path)
+    return _read(_Reader(path.read_bytes()), path, True)
+
+
+def read_replay_header(path) -> Replay:
+    """Player, counts, combo and mods only (no cursor data): fast enough for long lists."""
+    path = Path(path)
+    with open(path, "rb") as f:
+        head = f.read(4096)
+    try:
+        return _read(_Reader(head), path, False)
+    except struct.error:   # unusually long strings: read it all
+        return _read(_Reader(path.read_bytes()), path, False)
 
 
 def key_presses(frames):
