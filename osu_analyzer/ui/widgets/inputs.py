@@ -1,11 +1,66 @@
 """Inputs: search field, volume slider and colour swatches."""
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QSizePolicy, QWidget
+from PySide6.QtCore import QEvent, QLocale, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QDoubleValidator, QIntValidator
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import icons
 from ..theme import mix, qcolor, theme
-from .base import painter
+from .base import label, painter
+
+
+def _number_text(x):
+    return f"{x:.2f}".rstrip("0").rstrip(".")
+
+
+class NumberField(QWidget):
+    """Number input (decimals = 0 for whole numbers) that shows what is wrong in red under it,
+    instead of an error dialog."""
+
+    textChanged = Signal(str)
+
+    def __init__(self, value, decimals=0, maximum=100000, width=96, parent=None):
+        super().__init__(parent)
+        self.decimals = decimals
+        self.edit = QLineEdit(_number_text(value))
+        if decimals:
+            v = QDoubleValidator(0, maximum, decimals, self.edit)
+            v.setNotation(QDoubleValidator.Notation.StandardNotation)
+            v.setLocale(QLocale.c())
+        else:
+            v = QIntValidator(0, int(maximum), self.edit)
+        self.edit.setValidator(v)
+        self.edit.setFixedWidth(width)
+        self.edit.textChanged.connect(self.textChanged)
+        self.error = label("", "error", wrap=True)
+        self.error.setFixedWidth(width + 40)
+        self.error.hide()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(3)
+        lay.addWidget(self.edit)
+        lay.addWidget(self.error)
+
+    def text(self):
+        return self.edit.text()
+
+    def setText(self, text):
+        self.edit.setText(text)
+
+    def value(self):
+        """The number, or None when the field is empty or unfinished."""
+        try:
+            return float(self.edit.text()) if self.decimals else int(self.edit.text())
+        except ValueError:
+            return None
+
+    def set_error(self, text=""):
+        self.error.setText(text)
+        self.error.setVisible(bool(text))
+        if self.edit.property("invalid") != bool(text):
+            self.edit.setProperty("invalid", bool(text))
+            self.edit.style().unpolish(self.edit)
+            self.edit.style().polish(self.edit)
 
 
 class SearchField(QWidget):

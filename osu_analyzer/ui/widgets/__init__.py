@@ -5,5 +5,5 @@ from .brand import BrandMark, paint_brand
 from .buttons import Button, IconButton, PlayButton
 from .card import Card, Chip, EmptyState, Surface, hbox
 from .feedback import LoadingOverlay, ProgressBar
-from .inputs import ComboBox, SearchField, Swatches, VolumeSlider
+from .inputs import ComboBox, NumberField, SearchField, Swatches, VolumeSlider
 from .segmented import SegmentedControl

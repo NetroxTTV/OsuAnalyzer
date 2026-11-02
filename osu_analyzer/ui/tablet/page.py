@@ -1,14 +1,14 @@
 """Tablet Zone page: suggests a tablet area from where you over / underaim on the playfield."""
 
-from PySide6.QtCore import QLocale, Qt, QTimer, Signal
-from PySide6.QtGui import QDoubleValidator, QGuiApplication, QIntValidator
-from PySide6.QtWidgets import QGridLayout, QLineEdit, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 from ...core import DRIVERS, current_driver, settings, suggest_tablet_area
 from ...core.drivers import fmt
 from .. import icons
 from ..theme import theme
-from ..widgets import Button, Card, SegmentedControl, clear_layout, hbox, label
+from ..widgets import Button, Card, NumberField, SegmentedControl, clear_layout, hbox, label
 from .views import FieldHeatmap, TabletAreaView
 
 EDGES = (("top", "Top"), ("bottom", "Bottom"), ("left", "Left"), ("right", "Right"))
@@ -102,31 +102,34 @@ class TabletPage(QWidget):
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(8)
+        top = Qt.AlignmentFlag.AlignTop
         for i, (key, name) in enumerate(d.fields):
             r, c = divmod(i, 2)
-            grid.addWidget(label(name, "muted"), r, c * 2)
-            grid.addWidget(self._input(key, stored[key]), r, c * 2 + 1)
-        grid.addWidget(label("Tablet", "muted"), 2, 0)
-        size = hbox(self._input("tablet_w", stored["tablet_w"]), label("×", "muted"),
-                    self._input("tablet_h", stored["tablet_h"]), spacing=8)
-        grid.addLayout(size, 2, 1, 1, 3)
+            f = self._input(key, stored[key])
+            grid.addWidget(self._name(name, f), r, c * 2, top)
+            grid.addWidget(f, r, c * 2 + 1, top)
+        tw, th = self._input("tablet_w", stored["tablet_w"]), self._input("tablet_h", stored["tablet_h"])
+        grid.addWidget(self._name("Tablet", tw), 2, 0, top)
+        size = hbox(tw, self._name("×", tw), th, spacing=8)
+        size.setAlignment(top)
+        grid.addLayout(size, 2, 1, 1, 3, top)
         grid.setColumnStretch(4, 1)
         self.form.addLayout(grid)
         self.form.addWidget(label(d.tablet_hint, "caption", wrap=True))
 
     def _input(self, key, value):
-        e = QLineEdit(fmt(value))
-        if self.driver.decimals:
-            v = QDoubleValidator(0, 100000, self.driver.decimals, e)
-            v.setNotation(QDoubleValidator.Notation.StandardNotation)
-            v.setLocale(QLocale.c())
-        else:
-            v = QIntValidator(0, 100000, e)
-        e.setValidator(v)
-        e.setFixedWidth(96)
-        e.textChanged.connect(lambda _t: self._timer.start())
-        self.inputs[key] = e
-        return e
+        f = NumberField(value, self.driver.decimals)
+        f.textChanged.connect(lambda _t: self._timer.start())
+        self.inputs[key] = f
+        return f
+
+    @staticmethod
+    def _name(text, field):
+        """Field name, level with its input even when an error shows under it."""
+        lbl = label(text, "muted")
+        field.edit.ensurePolished()
+        lbl.setFixedHeight(field.edit.sizeHint().height())
+        return lbl
 
     def _set_driver(self, key):
         self.driver = DRIVERS[key]
@@ -144,18 +147,20 @@ class TabletPage(QWidget):
     def refresh(self):
         clear_layout(self.result)
         d = self.driver
-        try:
-            vals = {k: float(e.text()) if d.decimals else int(e.text()) for k, e in self.inputs.items()}
-        except ValueError:
-            self._note("Enter a number in every field." if d.decimals else "Enter whole numbers in every field.")
+        vals = {k: f.value() for k, f in self.inputs.items()}
+        errors = {k: "enter a number" for k, v in vals.items() if v is None} or d.check(vals)
+        for k, f in self.inputs.items():
+            f.set_error(errors.get(k, ""))
+        if errors:
+            tablet = (vals["tablet_w"], vals["tablet_h"])
+            if "tablet_w" in errors or "tablet_h" in errors:
+                tablet = (d.defaults["tablet_w"], d.defaults["tablet_h"])
+            self.tablet_view.set_data(tablet, None, None)
+            self.heatmap.set_suggestion(None)
+            self.aim_text.setText("")
             return
         area = d.edges(vals)
         tablet = (vals["tablet_w"], vals["tablet_h"])
-        if area[1] <= area[0] or area[3] <= area[2] or min(tablet) <= 0:
-            self._note(d.invalid)
-            default = (d.defaults["tablet_w"], d.defaults["tablet_h"])
-            self.tablet_view.set_data(tablet if min(tablet) > 0 else default, None, None)
-            return
         d.store(vals)
 
         if not self.analyses:
