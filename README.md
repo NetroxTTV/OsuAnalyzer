@@ -4,6 +4,8 @@ A desktop app for osu!standard that reads your replays and shows **where** and *
 
 It works with osu!stable: it finds your osu! folder, lists the replays in `Replays/`, and looks up the matching beatmap in your `Songs/` folder automatically.
 
+![osu! Hit Analyzer](assets/analyzer.png)
+
 ## Download
 
 Grab **`osu-Hit-Analyzer.exe`** from the [latest release](https://github.com/NetroxTTV/OsuAnalyzer/releases/latest) and run it. No install needed.
